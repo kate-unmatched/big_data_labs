@@ -22,6 +22,8 @@ import com.ververica.flinktraining.exercises.datastream_java.sources.TaxiFareSou
 import com.ververica.flinktraining.exercises.datastream_java.sources.TaxiRideSource;
 import com.ververica.flinktraining.exercises.datastream_java.utils.ExerciseBase;
 import com.ververica.flinktraining.exercises.datastream_java.utils.MissingSolutionException;
+import org.apache.flink.api.common.state.ValueState;
+import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.utils.ParameterTool;
 import org.apache.flink.configuration.Configuration;
@@ -82,21 +84,58 @@ public class ExpiringStateExercise extends ExerciseBase {
 
 	public static class EnrichmentFunction extends KeyedCoProcessFunction<Long, TaxiRide, TaxiFare, Tuple2<TaxiRide, TaxiFare>> {
 
-		@Override
-		public void open(Configuration config) throws Exception {
-			throw new MissingSolutionException();
-		}
+		private ValueState<TaxiRide> rideState;
+		private ValueState<TaxiFare> fareState;
 
 		@Override
-		public void onTimer(long timestamp, OnTimerContext ctx, Collector<Tuple2<TaxiRide, TaxiFare>> out) throws Exception {
+		public void open(Configuration config) {
+			rideState = getRuntimeContext().getState(new ValueStateDescriptor<>("savedRide", TaxiRide.class));
+			fareState = getRuntimeContext().getState(new ValueStateDescriptor<>("savedFare", TaxiFare.class));
 		}
 
 		@Override
 		public void processElement1(TaxiRide ride, Context context, Collector<Tuple2<TaxiRide, TaxiFare>> out) throws Exception {
+			TaxiFare fare = fareState.value();
+
+			if (fare != null) {
+				// обе части есть — объединяем и отправляем
+				fareState.clear();
+				out.collect(new Tuple2<>(ride, fare));
+			} else {
+				rideState.update(ride);
+				// ждём вторую часть максимум 5 минут (можно настроить)
+				context.timerService().registerEventTimeTimer(ride.getEventTime() + 5 * 60 * 1000);
+			}
 		}
 
 		@Override
 		public void processElement2(TaxiFare fare, Context context, Collector<Tuple2<TaxiRide, TaxiFare>> out) throws Exception {
+			TaxiRide ride = rideState.value();
+
+			if (ride != null) {
+				// обе части есть — объединяем и отправляем
+				rideState.clear();
+				out.collect(new Tuple2<>(ride, fare));
+			} else {
+				fareState.update(fare);
+				context.timerService().registerEventTimeTimer(fare.getEventTime() + 5 * 60 * 1000);
+			}
+		}
+
+		@Override
+		public void onTimer(long timestamp, OnTimerContext ctx, Collector<Tuple2<TaxiRide, TaxiFare>> out) throws Exception {
+			TaxiRide ride = rideState.value();
+			TaxiFare fare = fareState.value();
+
+			if (ride != null && fare == null) {
+				ctx.output(unmatchedRides, ride);
+				rideState.clear();
+			}
+
+			if (fare != null && ride == null) {
+				ctx.output(unmatchedFares, fare);
+				fareState.clear();
+			}
 		}
 	}
 }

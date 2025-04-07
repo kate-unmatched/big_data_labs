@@ -1,5 +1,17 @@
-**⚠️ This repository has been archived and is no longer being maintained. For up-to-date content, see https://github.com/ververica/flink-training. ⚠️**
+# Лабораторная №3
 
----
+### HourlyTipsTest
 
-This repository contains examples and exercises for Apache Flink.
+![img.png](img.png)
+
+### ExpiringStateTest
+
+![img_1.png](img_1.png)
+
+### RideCleanisingExercise
+
+![img_2.png](img_2.png)
+
+### RidesAndFaresTest
+
+![img_3.png](img_3.png)
